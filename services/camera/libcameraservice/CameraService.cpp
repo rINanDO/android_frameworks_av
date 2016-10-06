@@ -162,7 +162,12 @@ const char *sFileName = "lastOpenSessionDumpFile";
 static constexpr int32_t kSystemNativeClientScore = resource_policy::PERCEPTIBLE_APP_ADJ;
 static constexpr int32_t kSystemNativeClientState =
         ActivityManager::PROCESS_STATE_PERSISTENT_UI;
-static const std::string kServiceName("cameraserver");
+#ifdef NO_CAMERA_SERVER
+    static const std::string kServiceName("media");
+#else
+    static const std::string kServiceName("cameraserver");
+#endif
+
 
 const std::string CameraService::kOfflineDevice("offline-");
 const std::string CameraService::kWatchAllClientsFlag("all");
@@ -1071,7 +1076,9 @@ Status CameraService::getSessionCharacteristics(const std::string& unresolvedCam
                 return STATUS_ERROR(CameraService::ERROR_INVALID_OPERATION, msg.c_str());
             }
     }
-
+#ifdef NO_CAMERA_SERVER
+    return Status::ok();
+#endif
     Status res = filterSensitiveMetadataIfNeeded(cameraId, outMetadata);
     if (flags::analytics_24q3()) {
         mCameraServiceProxyWrapper->logSessionCharacteristicsQuery(cameraId,
@@ -1744,8 +1751,13 @@ Status CameraService::errorNotTrusted(int clientPid, int clientUid, const std::s
             clientName.c_str(), clientPid, clientUid);
 }
 
+#ifdef NO_CAMERA_SERVER
+Status CameraService::validateClientPermissionsLocked(const std::string& cameraId,
+        const std::string& /*clientName*/, int /*clientUid*/, int /*clientPid*/) const {
+#else
 Status CameraService::validateClientPermissionsLocked(const std::string& cameraId,
         const std::string& clientName, int clientUid, int clientPid) const {
+#endif
     int callingPid = getCallingPid();
     int callingUid = getCallingUid();
 
@@ -1761,6 +1773,8 @@ Status CameraService::validateClientPermissionsLocked(const std::string& cameraI
         return STATUS_ERROR_FMT(ERROR_ILLEGAL_ARGUMENT, "No camera device with ID \"%s\""
                 "found while trying to query device kind", cameraId.c_str());
     }
+
+#ifndef NO_CAMERA_SERVER
 
     // Get the device id that owns this camera.
     auto [deviceId, _] = mVirtualDeviceCameraIdMapper.getDeviceIdAndMappedCameraIdPair(cameraId);
@@ -1833,6 +1847,7 @@ Status CameraService::validateClientPermissionsLocked(const std::string& cameraI
                     clientName.c_str(), callingPid, clientUid, cameraId.c_str());
         }
     }
+#endif
 
     return Status::ok();
 }
