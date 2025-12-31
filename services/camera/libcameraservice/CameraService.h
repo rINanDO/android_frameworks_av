@@ -84,6 +84,7 @@ class CameraService :
     public AttributionAndPermissionUtilsEncapsulator
 {
     friend class BinderService<CameraService>;
+    friend class CameraClient;
     friend class CameraOfflineSessionClient;
 public:
     class Client;
@@ -176,6 +177,13 @@ public:
             int32_t cameraId, int targetSdkVersion, int rotationOverride, bool forceSlowJpegMode,
             const AttributionSourceState& clientAttribution,
             int32_t devicePolicy, /*out*/ sp<hardware::ICamera>* device) override;
+
+    virtual binder::Status     connectLegacy(const sp<hardware::ICameraClient>& cameraClient,
+            int32_t cameraId, int32_t halVersion, int targetSdkVersion, int rotationOverride,
+            bool forceSlowJpegMode, const AttributionSourceState& clientAttribution,
+            int32_t devicePolicy,
+            /*out*/
+            sp<hardware::ICamera>* device);
 
     virtual binder::Status     connectDevice(
             const sp<hardware::camera2::ICameraDeviceCallbacks>& cameraCb,
@@ -1009,7 +1017,7 @@ private:
     // Single implementation shared between the various connect calls
     template<class CALLBACK, class CLIENT>
     binder::Status connectHelper(const sp<CALLBACK>& cameraCb, const std::string& cameraId,
-            int api1CameraId, const std::string& clientPackageName, bool systemNativeClient,
+            int api1CameraId, int halVersion, const std::string& clientPackageName, bool systemNativeClient,
             const std::optional<std::string>& clientFeatureId, int clientUid, int clientPid,
             apiLevel effectiveApiLevel, bool shimUpdateOnly, int scoreOffset, int targetSdkVersion,
             int rotationOverride, bool forceSlowJpegMode,
@@ -1505,7 +1513,7 @@ private:
             const sp<IInterface>& cameraCb, const std::string& packageName,
             bool systemNativeClient, const std::optional<std::string>& featureId,
             const std::string& cameraId, int api1CameraId, int facing, int sensorOrientation,
-            int clientPid, uid_t clientUid, int servicePid,
+            int clientPid, uid_t clientUid, int servicePid, int halVersion,
             std::pair<int, IPCTransport> deviceVersionAndIPCTransport, apiLevel effectiveApiLevel,
             bool overrideForPerfClass, int rotationOverride, bool forceSlowJpegMode,
             const std::string& originalCameraId,

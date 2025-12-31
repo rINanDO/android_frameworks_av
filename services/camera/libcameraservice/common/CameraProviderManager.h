@@ -35,6 +35,8 @@
 #include <utils/SessionConfigurationUtils.h>
 #include <aidl/android/hardware/camera/provider/ICameraProvider.h>
 #include <android/hardware/camera/common/1.0/types.h>
+#include <android/hardware/camera/provider/2.4/ICameraProvider.h>
+#include <android/hardware/camera/provider/2.4/ICameraProviderCallback.h>
 #include <android/hardware/camera/provider/2.5/ICameraProvider.h>
 #include <android/hardware/camera/provider/2.6/ICameraProviderCallback.h>
 #include <android/hardware/camera/provider/2.6/ICameraProvider.h>
@@ -415,6 +417,11 @@ public:
             /*out*/
             sp<hardware::camera::device::V3_2::ICameraDeviceSession> *session);
 
+    status_t openSession(const std::string &id,
+            const sp<hardware::camera::device::V1_0::ICameraDeviceCallback>& callback,
+            /*out*/
+            sp<hardware::camera::device::V1_0::ICameraDevice> *session);
+
     /**
      * Notify that the camera or torch is no longer being used by a camera client
      */
@@ -539,6 +546,10 @@ private:
         bool mSetTorchModeSupported;
         bool mIsRemote;
 
+        // This pointer is used to keep a reference to the ICameraProvider that was last accessed.
+        wp<hardware::camera::provider::V2_4::ICameraProvider> mActiveInterface;
+        sp<hardware::camera::provider::V2_4::ICameraProvider> mSavedInterface;
+
         ProviderInfo(const std::string &providerName, const std::string &providerInstance,
                 CameraProviderManager *manager);
         ~ProviderInfo();
@@ -607,6 +618,7 @@ private:
             bool mIsLogicalCamera;
             std::vector<std::string> mPhysicalIds;
             hardware::CameraInfo mInfo;
+
             SystemCameraKind mSystemCameraKind = SystemCameraKind::PUBLIC;
 
             const CameraResourceCost mResourceCost;
@@ -674,6 +686,7 @@ private:
                 return INVALID_OPERATION;
             }
 
+
             DeviceInfo(const std::string& name, const metadata_vendor_id_t tagId,
                     const std::string &id, const hardware::hidl_version& version,
                     const std::vector<std::string>& publicCameraIds,
@@ -693,6 +706,7 @@ private:
             bool mSupportNativeZoomRatio; // const after constructor
             const std::vector<std::string>& mPublicCameraIds;
             bool mCompositeJpegRDisabled;
+
         };
         std::vector<std::unique_ptr<DeviceInfo>> mDevices;
         std::unordered_set<std::string> mUniqueCameraIds;
@@ -706,8 +720,36 @@ private:
         // physical camera IDs.
         std::vector<std::string> mProviderPublicCameraIds;
 
+        // HALv1-specific camera fields, including the actual device interface
+        struct DeviceInfo1 : public DeviceInfo {
+            typedef hardware::camera::device::V1_0::ICameraDevice InterfaceT;
+
+            virtual status_t filterSmallJpegSizes() override;
+            virtual status_t getCameraInfo(
+                    int rotationOverride,
+                    int *portraitRotation,
+                    hardware::CameraInfo *info) const override;
+            //In case of Device1Info assume that we are always API1 compatible
+            virtual bool isAPI1Compatible() const override { return true; }
+            virtual status_t dumpState(int fd) = 0;
+
+
+            DeviceInfo1(const std::string& name, const metadata_vendor_id_t tagId,
+                    const std::string &id, uint16_t majorVersion, uint16_t minorVersion,
+                    const CameraResourceCost& resourceCost,
+                    sp<ProviderInfo> parentProvider,
+                    const std::vector<std::string>& publicCameraIds,
+                    sp<InterfaceT> interface);
+            virtual ~DeviceInfo1();
+        private:
+            CameraParameters2 mDefaultParameters;
+            status_t cacheCameraInfo(sp<InterfaceT> interface);
+
+        };
+
         // HALv3-specific camera fields, including the actual device interface
         struct DeviceInfo3 : public DeviceInfo {
+            typedef hardware::camera::device::V3_2::ICameraDevice InterfaceT;
 
             virtual status_t setTorchMode(bool enabled) = 0;
             virtual status_t turnOnTorchWithStrengthLevel(int32_t torchStrength) = 0;
@@ -729,7 +771,7 @@ private:
                         int64_t newState) override;
 
             DeviceInfo3(const std::string& name, const metadata_vendor_id_t tagId,
-                    const std::string &id, uint16_t minorVersion,
+                    const std::string &id, uint16_t majorVersion, uint16_t minorVersion,
                     const CameraResourceCost& resourceCost,
                     sp<ProviderInfo> parentProvider,
                     const std::vector<std::string>& publicCameraIds);
@@ -816,7 +858,7 @@ private:
         std::unique_ptr<ProviderInfo::DeviceInfo>
         virtual initializeDeviceInfo(
                 const std::string &name, const metadata_vendor_id_t tagId,
-                const std::string &id, uint16_t minorVersion) = 0;
+                const std::string &id, uint16_t majorVersion, uint16_t minorVersion) = 0;
 
         virtual status_t reCacheConcurrentStreamingCameraIdsLocked() = 0;
 
@@ -883,6 +925,9 @@ private:
     // and the calling code doesn't mutate the list of providers or their lists of devices.
     // No guarantees on the order of traversal
     ProviderInfo::DeviceInfo* findDeviceInfoLocked(const std::string& id) const;
+
+    ProviderInfo::DeviceInfo* findDeviceInfoLocked(const std::string& id,
+        hardware::hidl_version minVersion, hardware::hidl_version maxVersion) const;
 
     bool isCompositeJpegRDisabledLocked(const std::string &id) const;
 

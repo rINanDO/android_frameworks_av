@@ -24,6 +24,8 @@
 #include <utils/SortedVector.h>
 #include "common/CameraProviderManager.h"
 #include "common/CameraDeviceBase.h"
+#include "device1/CameraHardwareInterface.h"
+
 
 namespace android {
 
@@ -131,11 +133,67 @@ class ProviderFlashControl : public FlashControlBase {
         // FlashControlBase
         status_t hasFlashUnit(const std::string& cameraId, bool *hasFlash);
         status_t setTorchMode(const std::string& cameraId, bool enabled);
-        status_t turnOnTorchWithStrengthLevel(const std::string& cameraId, int32_t torchStrength);
-        status_t getTorchStrengthLevel(const std::string& cameraId, int32_t* torchStrength);
+        virtual status_t turnOnTorchWithStrengthLevel(const std::string& cameraId, int32_t torchStrength);
+        virtual status_t getTorchStrengthLevel(const std::string& cameraId, int32_t* torchStrength);
 
     private:
         sp<CameraProviderManager> mProviderManager;
+
+        Mutex mLock;
+};
+
+/**
+ * Flash control for camera module <= v2.3 and camera HAL v1
+ */
+class CameraHardwareInterfaceFlashControl : public FlashControlBase {
+    public:
+        CameraHardwareInterfaceFlashControl(
+                sp<CameraProviderManager> manager,
+                CameraProviderManager::StatusListener* callbacks);
+        virtual ~CameraHardwareInterfaceFlashControl();
+
+        // FlashControlBase
+        status_t setTorchMode(const std::string& cameraId, bool enabled);
+        status_t hasFlashUnit(const std::string& cameraId, bool *hasFlash);
+
+    private:
+        // connect to a camera device
+        status_t connectCameraDevice(const std::string& cameraId);
+
+        // disconnect and free mDevice
+        status_t disconnectCameraDevice();
+
+        // initialize the preview window
+        status_t initializePreviewWindow(const sp<CameraHardwareInterface>& device,
+                int32_t width, int32_t height);
+
+        // start preview and enable torch
+        status_t startPreviewAndTorch();
+
+        // get the smallest surface
+        status_t getSmallestSurfaceSize(int32_t *width, int32_t *height);
+
+        // protected by mLock
+        // If this function opens camera device in order to check if it has a flash unit, the
+        // camera device will remain open if keepDeviceOpen is true and the camera device will be
+        // closed if keepDeviceOpen is false. If camera device is already open when calling this
+        // function, keepDeviceOpen is ignored.
+        status_t hasFlashUnitLocked(const std::string& cameraId, bool *hasFlash, bool keepDeviceOpen);
+
+        virtual status_t turnOnTorchWithStrengthLevel(const std::string& cameraId, int32_t torchStrength);
+        virtual status_t getTorchStrengthLevel(const std::string& cameraId, int32_t* torchStrength);
+
+        sp<CameraProviderManager> mProviderManager;
+        CameraProviderManager::StatusListener* mCallbacks;
+        sp<CameraHardwareInterface> mDevice;
+        std::string mCameraId;
+        CameraParameters mParameters;
+        bool mTorchEnabled;
+
+        sp<IGraphicBufferProducer> mProducer;
+        sp<IGraphicBufferConsumer>  mConsumer;
+        sp<GLConsumer> mSurfaceTexture;
+        sp<Surface> mSurface;
 
         Mutex mLock;
 };

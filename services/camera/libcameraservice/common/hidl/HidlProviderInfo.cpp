@@ -322,8 +322,35 @@ status_t HidlProviderInfo::notifyDeviceStateChange(int64_t newDeviceState) {
     return OK;
 }
 
+sp<device::V1_0::ICameraDevice>
+HidlProviderInfo::startDeviceInterface_V1_X(const std::string &name) {
+    Status status;
+    sp<device::V1_0::ICameraDevice> cameraInterface;
+    hardware::Return<void> ret;
+    const sp<provider::V2_4::ICameraProvider> interface = startProviderInterface();
+    if (interface == nullptr) {
+        return nullptr;
+    }
+    ret = interface->getCameraDeviceInterface_V1_x(name, [&status, &cameraInterface](
+            Status s, sp<device::V1_0::ICameraDevice> interface) {
+                    status = s;
+                    cameraInterface = interface;
+            });
+    if (!ret.isOk()) {
+        ALOGE("%s: Transaction error trying to obtain interface for camera device %s: %s",
+                __FUNCTION__, name.c_str(), ret.description().c_str());
+        return nullptr;
+    }
+    if (status != Status::OK) {
+        ALOGE("%s: Unable to obtain interface for camera device %s: %s", __FUNCTION__,
+                name.c_str(), statusToString(status));
+        return nullptr;
+    }
+    return cameraInterface;
+}
+
 sp<device::V3_2::ICameraDevice>
-HidlProviderInfo::startDeviceInterface(const std::string &name) {
+HidlProviderInfo::startDeviceInterface_V3_X(const std::string &name) {
     Status status;
     sp<device::V3_2::ICameraDevice> cameraInterface;
     hardware::Return<void> ret;
@@ -332,9 +359,9 @@ HidlProviderInfo::startDeviceInterface(const std::string &name) {
         return nullptr;
     }
     ret = interface->getCameraDeviceInterface_V3_x(name, [&status, &cameraInterface](
-        Status s, sp<device::V3_2::ICameraDevice> interface) {
-                status = s;
-                cameraInterface = interface;
+            Status s, sp<device::V3_2::ICameraDevice> interface) {
+                    status = s;
+                    cameraInterface = interface;
             });
     if (!ret.isOk()) {
         ALOGE("%s: Transaction error trying to obtain interface for camera device %s: %s",
@@ -457,18 +484,52 @@ void HidlProviderInfo::serviceDied(uint64_t cookie,
 std::unique_ptr<CameraProviderManager::ProviderInfo::DeviceInfo>
     HidlProviderInfo::initializeDeviceInfo(
         const std::string &name, const metadata_vendor_id_t tagId,
-        const std::string &id, uint16_t minorVersion) {
+        const std::string &id, uint16_t majorVersion, uint16_t minorVersion) {
     Status status;
+    common::V1_0::CameraResourceCost resourceCost;
+    if (majorVersion == 1 ){
+        auto cameraInterface = startDeviceInterface_V1_X(name);
+        if (cameraInterface == nullptr) return nullptr;
 
-    auto cameraInterface = startDeviceInterface(name);
+        cameraInterface->getResourceCost([&status, &resourceCost](
+            Status s, common::V1_0::CameraResourceCost cost) {
+                    status = s;
+                    resourceCost = cost;
+                });
+
+        if (status != Status::OK) {
+            ALOGE("%s: Unable to obtain resource costs for camera device %s: %s", __FUNCTION__,
+                    name.c_str(), statusToString(status));
+            return nullptr;
+        }
+
+        for (auto& conflictName : resourceCost.conflictingDevices) {
+            uint16_t major, minor;
+            std::string type, id;
+            status_t res = parseDeviceName(conflictName, &major, &minor, &type, &id);
+            if (res != OK) {
+                ALOGE("%s: Failed to parse conflicting device %s", __FUNCTION__, conflictName.c_str());
+                return nullptr;
+            }
+            conflictName = id;
+        }
+
+        
+        return std::unique_ptr<DeviceInfo>(
+                new HidlDeviceInfo1(name, tagId, id, majorVersion, minorVersion, HalToFrameworkResourceCost(resourceCost),
+                        this, mProviderPublicCameraIds, cameraInterface));
+
+    } 
+
+    auto cameraInterface = startDeviceInterface_V3_X(name);
     if (cameraInterface == nullptr) return nullptr;
 
-    common::V1_0::CameraResourceCost resourceCost;
     cameraInterface->getResourceCost([&status, &resourceCost](
         Status s, common::V1_0::CameraResourceCost cost) {
                 status = s;
                 resourceCost = cost;
             });
+
     if (status != Status::OK) {
         ALOGE("%s: Unable to obtain resource costs for camera device %s: %s", __FUNCTION__,
                 name.c_str(), statusToString(status));
@@ -486,9 +547,11 @@ std::unique_ptr<CameraProviderManager::ProviderInfo::DeviceInfo>
         conflictName = id;
     }
 
-    return std::unique_ptr<DeviceInfo3>(
-        new HidlDeviceInfo3(name, tagId, id, minorVersion, HalToFrameworkResourceCost(resourceCost),
-                this, mProviderPublicCameraIds, cameraInterface));
+    
+    return 
+        std::unique_ptr<DeviceInfo3>(
+            new HidlDeviceInfo3(name, tagId, id, majorVersion, minorVersion, HalToFrameworkResourceCost(resourceCost),
+                    this, mProviderPublicCameraIds, cameraInterface));
 }
 
 status_t HidlProviderInfo::reCacheConcurrentStreamingCameraIdsLocked() {
@@ -554,15 +617,108 @@ status_t HidlProviderInfo::getConcurrentCameraIdsInternalLocked(
     return OK;
 }
 
+HidlProviderInfo::HidlDeviceInfo1::HidlDeviceInfo1(
+        const std::string& name,
+        const metadata_vendor_id_t tagId,
+        const std::string &id, uint16_t majorVersion, uint16_t minorVersion,
+        const CameraResourceCost& resourceCost,
+        sp<CameraProviderManager::ProviderInfo> parentProvider,
+        const std::vector<std::string>& publicCameraIds,
+        sp<hardware::camera::device::V1_0::ICameraDevice> interface) :
+        DeviceInfo1(name, tagId, id, majorVersion, minorVersion, resourceCost, parentProvider, publicCameraIds, interface),
+        mVersion(hardware::hidl_version{majorVersion, minorVersion}) {
+
+    // Save HAL reference indefinitely
+    if (kEnableLazyHal) {
+        mSavedInterface = interface;
+    }
+}    
+
+status_t HidlProviderInfo::HidlDeviceInfo1::setTorchMode(bool enabled) {
+    using hardware::camera::common::V1_0::TorchMode;
+    const sp<hardware::camera::device::V1_0::ICameraDevice> interface = startDeviceInterface();
+    Status s = interface->setTorchMode(enabled ? TorchMode::ON : TorchMode::OFF);
+    return mapToStatusT(s);
+}
+
+status_t HidlProviderInfo::HidlDeviceInfo1::turnOnTorchWithStrengthLevel(
+        int32_t torchStrengthLevel) {
+    ALOGW("%s HIDL Cameral HAL V1 does not support turning on torch with variable strength, just turning on/off.", __FUNCTION__);
+    return setTorchMode(torchStrengthLevel > 0);
+}
+
+status_t HidlProviderInfo::HidlDeviceInfo1::getTorchStrengthLevel(int32_t *torchStrength) {
+    ALOGW("%s HIDL Cameral HAL V1 does not support variable torch strength level, just reporting 100.", __FUNCTION__);
+    *torchStrength = 100;
+    return OK;
+}
+
+sp<hardware::camera::device::V1_0::ICameraDevice>
+HidlProviderInfo::HidlDeviceInfo1::startDeviceInterface() {
+    Mutex::Autolock l(mDeviceAvailableLock);
+    sp<hardware::camera::device::V1_0::ICameraDevice> device;
+    ATRACE_CALL();
+    if (mSavedInterface == nullptr) {
+        sp<HidlProviderInfo> parentProvider =
+                static_cast<HidlProviderInfo *>(mParentProvider.promote().get());
+        if (parentProvider != nullptr) {
+            // Wait for lazy HALs to confirm device availability
+            if (parentProvider->isExternalLazyHAL() && !mIsDeviceAvailable) {
+                ALOGV("%s: Wait for external device to become available %s",
+                      __FUNCTION__,
+                      mId.c_str());
+
+                auto res = mDeviceAvailableSignal.waitRelative(mDeviceAvailableLock,
+                                                         kDeviceAvailableTimeout);
+                if (res != OK) {
+                    ALOGE("%s: Failed waiting for device to become available",
+                          __FUNCTION__);
+                    return nullptr;
+                }
+            }
+
+            device = parentProvider->startDeviceInterface_V1_X(mName);
+        }
+    } else {
+        device = (InterfaceT *) mSavedInterface.get();
+    }
+    return device;
+}
+
+status_t HidlProviderInfo::HidlDeviceInfo1::dumpState(int fd) {
+    native_handle_t* handle = native_handle_create(1,0);
+    handle->data[0] = fd;
+    const sp<hardware::camera::device::V1_0::ICameraDevice> interface =
+            startDeviceInterface();
+    if (interface == nullptr) {
+        return DEAD_OBJECT;
+    }
+    auto ret = interface->dumpState(handle);
+    native_handle_delete(handle);
+    if (!ret.isOk()) {
+        return INVALID_OPERATION;
+    }
+    return OK;
+}
+
+status_t HidlProviderInfo::HidlDeviceInfo1::isSessionConfigurationSupported(
+        const SessionConfiguration & /*configuration*/, bool /*overrideForPerfClass*/,
+        camera3::metadataGetter /*getMetadata*/, bool /*checkSessionParams*/, bool * /*status*/) {
+    // HIDL device doesn't support checking session parameters
+    return INVALID_OPERATION;
+}
+
+
 HidlProviderInfo::HidlDeviceInfo3::HidlDeviceInfo3(
         const std::string& name,
         const metadata_vendor_id_t tagId,
-        const std::string &id, uint16_t minorVersion,
+        const std::string &id, uint16_t majorVersion, uint16_t minorVersion,
         const CameraResourceCost& resourceCost,
         sp<CameraProviderManager::ProviderInfo> parentProvider,
         const std::vector<std::string>& publicCameraIds,
         sp<hardware::camera::device::V3_2::ICameraDevice> interface) :
-        DeviceInfo3(name, tagId, id, minorVersion, resourceCost, parentProvider, publicCameraIds) {
+        DeviceInfo3(name, tagId, id, majorVersion, minorVersion, resourceCost, parentProvider, publicCameraIds),
+        mVersion(hardware::hidl_version{majorVersion, minorVersion}) {
 
     // Get camera characteristics and initialize flash unit availability
     Status status;
@@ -831,10 +987,10 @@ HidlProviderInfo::HidlDeviceInfo3::startDeviceInterface() {
                 }
             }
 
-            device = parentProvider->startDeviceInterface(mName);
+            device = parentProvider->startDeviceInterface_V3_X(mName);
         }
     } else {
-        device = (hardware::camera::device::V3_2::ICameraDevice *) mSavedInterface.get();
+        device = (InterfaceT *) mSavedInterface.get();
     }
     return device;
 }

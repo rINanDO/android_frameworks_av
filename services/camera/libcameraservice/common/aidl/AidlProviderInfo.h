@@ -111,7 +111,7 @@ struct AidlProviderInfo : public CameraProviderManager::ProviderInfo {
                 mSavedInterface = nullptr;
 
         AidlDeviceInfo3(const std::string& , const metadata_vendor_id_t ,
-                const std::string &, uint16_t ,
+                const std::string &, uint16_t, uint16_t ,
                 const CameraResourceCost& ,
                 sp<ProviderInfo> ,
                 const std::vector<std::string>& ,
@@ -149,7 +149,7 @@ struct AidlProviderInfo : public CameraProviderManager::ProviderInfo {
     // Helper for initializeDeviceInfo to use the right CameraProvider get method.
     virtual std::unique_ptr<DeviceInfo> initializeDeviceInfo(const std::string &,
             const metadata_vendor_id_t , const std::string &,
-            uint16_t ) override;
+            uint16_t , uint16_t ) override;
 
     virtual status_t reCacheConcurrentStreamingCameraIdsLocked() override;
 

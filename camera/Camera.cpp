@@ -77,6 +77,63 @@ sp<Camera> Camera::connect(int cameraId, int targetSdkVersion, int rotationOverr
             forceSlowJpegMode, clientAttribution, devicePolicy);
 }
 
+status_t Camera::connectLegacy(int cameraId, int halVersion, int targetSdkVersion,
+        int rotationOverride, bool forceSlowJpegMode,
+        const AttributionSourceState& clientAttribution, int32_t devicePolicy,
+        sp<Camera>& camera)
+{
+    ALOGV("%s: connect legacy camera device", __FUNCTION__);
+    sp<Camera> c = new Camera(cameraId);
+    sp<::android::hardware::ICameraClient> cl = c;
+    status_t status = NO_ERROR;
+    const sp<::android::hardware::ICameraService>& cs = CameraBaseT::getCameraService();
+
+    binder::Status ret;
+    if (cs != nullptr) {
+        ret = cs.get()->connectLegacy(cl, cameraId, halVersion, targetSdkVersion,
+                rotationOverride, forceSlowJpegMode, clientAttribution, devicePolicy, /*out*/&(c->mCamera));
+    }   
+    if (ret.isOk() && c->mCamera != nullptr) {
+        IInterface::asBinder(c->mCamera)->linkToDeath(c);
+        c->mStatus = NO_ERROR;
+        camera = c;
+    } else {
+        switch(ret.serviceSpecificErrorCode()) {
+            case hardware::ICameraService::ERROR_DISCONNECTED:
+                status = -ENODEV;
+                break;
+            case hardware::ICameraService::ERROR_CAMERA_IN_USE:
+                status = -EBUSY;
+                break;
+            case hardware::ICameraService::ERROR_INVALID_OPERATION:
+                status = -EINVAL;
+                break;
+            case hardware::ICameraService::ERROR_MAX_CAMERAS_IN_USE:
+                status = -EUSERS;
+                break;
+            case hardware::ICameraService::ERROR_ILLEGAL_ARGUMENT:
+                status = BAD_VALUE;
+                break;
+            case hardware::ICameraService::ERROR_DEPRECATED_HAL:
+                status = -EOPNOTSUPP;
+                break;
+            case hardware::ICameraService::ERROR_DISABLED:
+                status = -EACCES;
+                break;
+            case hardware::ICameraService::ERROR_PERMISSION_DENIED:
+                status = PERMISSION_DENIED;
+                break;
+            default:
+                status = -EINVAL;
+                ALOGW("An error occurred while connecting to camera %d: %s", cameraId,
+                        (cs != nullptr) ? "Service not available" : ret.toString8().c_str());
+                break;
+        }
+        c.clear();
+    }
+    return status;
+}
+
 status_t Camera::reconnect()
 {
     ALOGV("reconnect");

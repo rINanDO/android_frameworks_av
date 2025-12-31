@@ -85,6 +85,11 @@ public:
                                 const AttributionSourceState& clientAttribution,
                                 int32_t devicePolicy = 0);
 
+    static  status_t  connectLegacy(int cameraId, int halVersion, int targetSdkVersion,
+                                    int rotationOverride, bool forceSlowJpegMode,
+                                    const AttributionSourceState& clientAttribution, int32_t devicePolicy,
+                                    sp<Camera>& camera);
+
             virtual     ~Camera();
 
             status_t    reconnect();

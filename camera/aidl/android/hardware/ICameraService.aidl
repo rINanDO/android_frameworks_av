@@ -109,9 +109,9 @@ interface ICameraService
             in AttributionSourceState clientAttribution, int devicePolicy);
 
     /**
-     * Default UID/PID values for non-privileged callers of connect() and connectDevice(). Can be
-     * used to set the pid/uid fields of AttributionSourceState to indicate the calling uid/pid
-     * should be used.
+     * Default UID/PID values for non-privileged callers of connect() and connectDevice(), and 
+     * connectLegacy(). Can be used to set the pid/uid fields of AttributionSourceState to indicate 
+     * the calling uid/pid  should be used.
      */
     const int USE_CALLING_UID = -1;
     const int USE_CALLING_PID = -1;
@@ -163,6 +163,23 @@ interface ICameraService
             int oomScoreOffset,
             int targetSdkVersion,
             int rotationOverride,
+            in AttributionSourceState clientAttribution,
+            int devicePolicy);
+
+    /**
+     * halVersion constant for connectLegacy
+     */
+    const int CAMERA_HAL_API_VERSION_UNSPECIFIED = -1;
+
+    /**
+     * Open a camera device in legacy mode, if supported by the camera module HAL.
+     */
+    ICamera connectLegacy(ICameraClient client,
+            int cameraId,
+            int halVersion,
+            int targetSdkVersion,
+            int rotationOverride,
+            boolean forceSlowJpegMode,
             in AttributionSourceState clientAttribution,
             int devicePolicy);
 

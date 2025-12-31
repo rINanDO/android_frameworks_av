@@ -392,7 +392,7 @@ const std::shared_ptr<ICameraProvider> AidlProviderInfo::startProviderInterface(
 std::unique_ptr<CameraProviderManager::ProviderInfo::DeviceInfo>
     AidlProviderInfo::initializeDeviceInfo(
         const std::string &name, const metadata_vendor_id_t tagId,
-        const std::string &id, uint16_t /*minorVersion*/) {
+        const std::string &id, uint16_t majorVersion, uint16_t /*minorVersion*/) {
     ::ndk::ScopedAStatus status;
 
     auto cameraInterface = startDeviceInterface(name);
@@ -426,7 +426,7 @@ std::unique_ptr<CameraProviderManager::ProviderInfo::DeviceInfo>
     }
 
     return std::unique_ptr<DeviceInfo3>(
-        new AidlDeviceInfo3(name, tagId, id, static_cast<uint16_t>(interfaceVersion),
+        new AidlDeviceInfo3(name, tagId, id, majorVersion, static_cast<uint16_t>(interfaceVersion),
                 HalToFrameworkResourceCost(resourceCost), this,
                 mProviderPublicCameraIds, cameraInterface));
 }
@@ -474,12 +474,12 @@ status_t AidlProviderInfo::getConcurrentCameraIdsInternalLocked(
 AidlProviderInfo::AidlDeviceInfo3::AidlDeviceInfo3(
         const std::string& name,
         const metadata_vendor_id_t tagId,
-        const std::string &id, uint16_t minorVersion,
+        const std::string &id, uint16_t majorVersion, uint16_t minorVersion,
         const CameraResourceCost& resourceCost,
         sp<CameraProviderManager::ProviderInfo> parentProvider,
         const std::vector<std::string>& publicCameraIds,
         std::shared_ptr<aidl::android::hardware::camera::device::ICameraDevice> interface) :
-        DeviceInfo3(name, tagId, id, minorVersion, resourceCost, parentProvider, publicCameraIds) {
+        DeviceInfo3(name, tagId, id, majorVersion, minorVersion, resourceCost, parentProvider, publicCameraIds) {
 
     // Get camera characteristics and initialize flash unit availability
     aidl::android::hardware::camera::device::CameraMetadata chars;

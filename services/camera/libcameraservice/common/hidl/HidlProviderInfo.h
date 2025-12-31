@@ -65,9 +65,10 @@ struct HidlProviderInfo : public CameraProviderManager::ProviderInfo,
         int targetSdkVersion, bool *isSupported) override;
 
     // Helper for initializeDeviceInfo to use the right CameraProvider get method.
-    sp<hardware::camera::device::V3_2::ICameraDevice>
-            startDeviceInterface(const std::string &deviceName);
+    sp<hardware::camera::device::V1_0::ICameraDevice> startDeviceInterface_V1_X(const std::string &deviceName);
+    sp<hardware::camera::device::V3_2::ICameraDevice> startDeviceInterface_V3_X(const std::string &deviceName);
 
+    
     // ICameraProviderCallbacks interface - these lock the parent mInterfaceMutex
     hardware::Return<void> cameraDeviceStatusChange(
             const hardware::hidl_string& ,
@@ -83,13 +84,41 @@ struct HidlProviderInfo : public CameraProviderManager::ProviderInfo,
     // hidl_death_recipient interface - this locks the parent mInterfaceMutex
     virtual void serviceDied(uint64_t , const wp<hidl::base::V1_0::IBase>& ) override;
 
+    struct HidlDeviceInfo1 : public CameraProviderManager::ProviderInfo::DeviceInfo1 {
+
+        hardware::hidl_version mVersion;
+        sp<IBase> mSavedInterface = nullptr;
+
+        HidlDeviceInfo1(const std::string& , const metadata_vendor_id_t ,
+                const std::string &, uint16_t , uint16_t ,
+                const CameraResourceCost& ,
+                sp<ProviderInfo> ,
+                const std::vector<std::string>& ,
+                sp<hardware::camera::device::V1_0::ICameraDevice>);
+
+        ~HidlDeviceInfo1() {}
+
+        virtual status_t setTorchMode(bool enabled) override;
+        virtual status_t turnOnTorchWithStrengthLevel(int32_t torchStrength) override;
+        virtual status_t getTorchStrengthLevel(int32_t *torchStrength) override;
+
+        virtual status_t dumpState(int fd) override;
+
+        virtual status_t isSessionConfigurationSupported(
+                const SessionConfiguration &/*configuration*/,
+                bool overrideForPerfClass, camera3::metadataGetter /*getMetadata*/,
+                bool checkSessionParams, bool *status/*status*/);
+
+        sp<hardware::camera::device::V1_0::ICameraDevice> startDeviceInterface();
+    };
+
     struct HidlDeviceInfo3 : public CameraProviderManager::ProviderInfo::DeviceInfo3 {
 
-        const hardware::hidl_version mVersion = hardware::hidl_version{3, 2};
+        hardware::hidl_version mVersion;
         sp<IBase> mSavedInterface = nullptr;
 
         HidlDeviceInfo3(const std::string& , const metadata_vendor_id_t ,
-                const std::string &, uint16_t ,
+                const std::string &, uint16_t , uint16_t ,
                 const CameraResourceCost& ,
                 sp<ProviderInfo> ,
                 const std::vector<std::string>& ,
@@ -115,7 +144,7 @@ struct HidlProviderInfo : public CameraProviderManager::ProviderInfo,
 
     virtual std::unique_ptr<DeviceInfo> initializeDeviceInfo(const std::string &,
             const metadata_vendor_id_t , const std::string &,
-            uint16_t ) override;
+            uint16_t, uint16_t ) override;
     virtual status_t reCacheConcurrentStreamingCameraIdsLocked() override;
 
     //Expects to have mLock locked
